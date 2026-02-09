@@ -1,4 +1,4 @@
-<style>
+
 /* ============================================
    DR. LUCAS CORDEIRO - FISIOTERAPEUTA
    Sistema de Gestão - PWA
@@ -1269,4 +1269,4 @@ h1, h2, h3, h4 {
     padding-bottom: calc(var(--nav-height) + max(0px, env(safe-area-inset-bottom)));
   }
 }
-</style>
+
