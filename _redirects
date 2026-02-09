@@ -1,0 +1,7 @@
+/css/*           /css/:splat           200
+/js/*            /js/:splat            200
+/icons/*         /icons/:splat         200
+/manifest.json   /manifest.json        200
+/sw.js           /sw.js                200
+
+/*               /index.html            200
