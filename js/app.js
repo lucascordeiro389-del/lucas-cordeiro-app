@@ -1,4 +1,4 @@
-<script>
+
 /* ============================================
    DR. LUCAS CORDEIRO - FISIOTERAPEUTA
    Sistema de Gestão - JavaScript
@@ -845,4 +845,3 @@ function gerarClientesExemplo() {
     { id: 'c8', nome: 'Roberto Dias', tipo: 'pilates', telefone: '(88) 99999-8888', frequenciaSemanal: 2, diaVencimento: 1, statusPagamento: 'pago', agendaFixa: 'SEG 17:00, QUI 17:00' },
   ];
 }
-</script>
