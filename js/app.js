@@ -1,3 +1,4 @@
+<script>
 /* ============================================
    DR. LUCAS CORDEIRO - FISIOTERAPEUTA
    Sistema de Gestão - JavaScript
@@ -7,7 +8,7 @@
 // CONFIGURAÇÕES E ESTADO
 // ============================================
 const CONFIG = {
-  API_URL: '',
+  API_URL: 'https://script.google.com/macros/s/AKfycbyH41V8Zk1_vlJuBq6B-76LScUFIuR3ZaY0HongKxtZfZAIg-p7U6_wetowESoCVjApww/exec',
   COMISSAO_PILATES: 0.40,
   VALOR_AULA_AVULSA: 27.00,
   PLANOS_PILATES: { 1: 180.00, 2: 280.00, 3: 380.00 },
@@ -844,3 +845,4 @@ function gerarClientesExemplo() {
     { id: 'c8', nome: 'Roberto Dias', tipo: 'pilates', telefone: '(88) 99999-8888', frequenciaSemanal: 2, diaVencimento: 1, statusPagamento: 'pago', agendaFixa: 'SEG 17:00, QUI 17:00' },
   ];
 }
+</script>
