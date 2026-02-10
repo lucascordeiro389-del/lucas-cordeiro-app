@@ -1,20 +1,27 @@
 /* ============================================
    DR. LUCAS CORDEIRO - FISIOTERAPEUTA
    Sistema de Gestão - JavaScript
-   VERSÃO COM API REAL
+   VERSÃO CORRIGIDA v1.1
    ============================================ */
 
 // ============================================
 // CONFIGURAÇÕES E ESTADO
 // ============================================
 const CONFIG = {
-  // URL do Google Apps Script
   API_URL: localStorage.getItem('apiUrl') || '',
   
   COMISSAO_PILATES: 0.40,
   VALOR_AULA_AVULSA: 27.00,
-  PLANOS_PILATES: { 1: 160.00, 2: 250.00, 3: 360.00 },
-  HORARIOS: ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00'],
+  
+  // VALORES ATUALIZADOS DOS PLANOS PILATES
+  PLANOS_PILATES: { 
+    1: 160.00,  // 1x/semana
+    2: 250.00,  // 2x/semana
+    3: 360.00,  // 3x/semana
+    4: 460.00   // 4x/semana
+  },
+  
+  HORARIOS: ['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'],
   DIAS_SEMANA: ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB']
 };
 
@@ -59,7 +66,6 @@ async function apiCall(action, params = {}) {
 // INICIALIZAÇÃO
 // ============================================
 function inicializarApp() {
-  // Carrega URL da API salva
   CONFIG.API_URL = localStorage.getItem('apiUrl') || '';
   
   atualizarDataHeader();
@@ -111,7 +117,6 @@ async function carregarAgendaHoje() {
     atualizarStatsHoje(result.data);
     renderizarAgendaHoje(result.data);
   } else {
-    // Se não tem API ou deu erro, mostra vazio
     state.agendaHoje = [];
     atualizarStatsHoje([]);
     renderizarAgendaHoje([]);
@@ -318,6 +323,9 @@ function renderizarClientes(clientes) {
   
   container.innerHTML = clientesFiltrados.map(c => {
     const tipo = c.Tipo || 'terapia';
+    const freq = parseInt(c.FrequenciaSemanal) || 2;
+    const valorMensalidade = c.ValorMensalidade || CONFIG.PLANOS_PILATES[freq] || 250;
+    
     return `
       <div class="card ${tipo}" onclick="abrirDetalheCliente('${c.ClienteID}')">
         <div class="card-header">
@@ -332,13 +340,13 @@ function renderizarClientes(clientes) {
           ${tipo === 'pilates' ? `
             <span class="card-info-item">
               <span class="material-icons-round">event</span>
-              ${c.FrequenciaSemanal || 2}x/semana
+              ${freq}x/semana
             </span>
             <span class="card-info-item status-badge status-${c.statusPagamento || 'pendente'}">
               ${c.statusPagamento === 'pago' ? '✓ Pago' : c.statusPagamento === 'atrasado' ? '! Atrasado' : '⏳ Pendente'}
             </span>
           ` : ''}
-          ${c.Pausado ? '<span class="card-info-item status-badge status-pausado">⏸️ Pausado</span>' : ''}
+          ${c.Pausado === true || c.Pausado === 'TRUE' ? '<span class="card-info-item status-badge status-pausado">⏸️ Pausado</span>' : ''}
         </div>
       </div>
     `;
@@ -509,6 +517,22 @@ async function renderizarComissoes(container) {
   `;
 }
 
+async function registrarPagamento(mensalidadeId) {
+  if (!confirm('Confirma o pagamento desta mensalidade?')) return;
+  
+  const result = await apiCall('registrarPagamentoMensalidade', { 
+    mensalidadeId, 
+    formaPagamento: 'Não informado' 
+  });
+  
+  if (result.success) {
+    toast('Pagamento registrado!', 'success');
+    carregarFinanceiro();
+  } else {
+    toast('Erro: ' + (result.error || 'Tente novamente'), 'error');
+  }
+}
+
 // ============================================
 // MODAIS
 // ============================================
@@ -560,9 +584,10 @@ function abrirModalNovoCliente(tipo) {
       <div class="form-group">
         <label class="form-label">Frequência Semanal</label>
         <div class="radio-group">
-          <label class="radio-option"><input type="radio" name="frequencia" value="1"><span class="radio-label">1x/sem - ${formatarMoeda(CONFIG.PLANOS_PILATES[1])}</span></label>
-          <label class="radio-option"><input type="radio" name="frequencia" value="2" checked><span class="radio-label">2x/sem - ${formatarMoeda(CONFIG.PLANOS_PILATES[2])}</span></label>
-          <label class="radio-option"><input type="radio" name="frequencia" value="3"><span class="radio-label">3x/sem - ${formatarMoeda(CONFIG.PLANOS_PILATES[3])}</span></label>
+          <label class="radio-option"><input type="radio" name="frequencia" value="1"><span class="radio-label">1x - ${formatarMoeda(CONFIG.PLANOS_PILATES[1])}</span></label>
+          <label class="radio-option"><input type="radio" name="frequencia" value="2" checked><span class="radio-label">2x - ${formatarMoeda(CONFIG.PLANOS_PILATES[2])}</span></label>
+          <label class="radio-option"><input type="radio" name="frequencia" value="3"><span class="radio-label">3x - ${formatarMoeda(CONFIG.PLANOS_PILATES[3])}</span></label>
+          <label class="radio-option"><input type="radio" name="frequencia" value="4"><span class="radio-label">4x - ${formatarMoeda(CONFIG.PLANOS_PILATES[4])}</span></label>
         </div>
       </div>
       <div class="form-group">
@@ -676,21 +701,28 @@ async function salvarCliente(event, tipo) {
     }
   });
   
+  // Calcula o valor da mensalidade baseado na frequência
+  const frequencia = parseInt(formData.get('frequencia')) || 2;
+  const valorMensalidade = CONFIG.PLANOS_PILATES[frequencia] || 250;
+  
   const dados = {
     Nome: formData.get('nome'),
     Telefone: formData.get('telefone'),
     Endereco: formData.get('endereco'),
     Tipo: tipo,
     Local: formData.get('local') || 'clinica',
-    FrequenciaSemanal: formData.get('frequencia') || 2,
-    DiaVencimento: formData.get('diaVencimento') || 10,
-    ValorSessao: formData.get('valorSessao'),
-    TotalSessoes: formData.get('totalSessoes'),
-    ValorPacote: formData.get('valorPacote'),
+    FrequenciaSemanal: frequencia,
+    DiaVencimento: parseInt(formData.get('diaVencimento')) || 10,
+    ValorMensalidade: valorMensalidade, // AGORA ENVIA O VALOR CORRETO
+    ValorSessao: parseFloat(formData.get('valorSessao')) || 0,
+    TotalSessoes: parseInt(formData.get('totalSessoes')) || 0,
+    ValorPacote: parseFloat(formData.get('valorPacote')) || 0,
     ValidadePacote: formData.get('validadePacote'),
     Observacoes: formData.get('observacoes'),
     horarios: horarios
   };
+  
+  console.log('Salvando cliente:', dados);
   
   const result = await apiCall('createCliente', dados);
   
@@ -699,6 +731,7 @@ async function salvarCliente(event, tipo) {
     fecharModal();
     carregarClientes();
     carregarAgendaHoje();
+    carregarAgendaSemanal();
   } else {
     toast('Erro ao cadastrar: ' + (result.error || 'Tente novamente'), 'error');
   }
@@ -773,18 +806,20 @@ async function abrirDetalheCliente(clienteId) {
   
   const c = result.data;
   const tipo = c.Tipo || 'terapia';
+  const freq = parseInt(c.FrequenciaSemanal) || 2;
+  const valorMensalidade = parseFloat(c.ValorMensalidade) || CONFIG.PLANOS_PILATES[freq] || 250;
   
   let infoEspecifica = '';
   
   if (tipo === 'pilates') {
     infoEspecifica = `
       <div class="finance-summary" style="margin-bottom: 16px;">
-        <div class="finance-card"><div class="finance-value">${c.FrequenciaSemanal || 2}x</div><div class="finance-label">Por Semana</div></div>
-        <div class="finance-card"><div class="finance-value">${formatarMoeda(CONFIG.PLANOS_PILATES[c.FrequenciaSemanal] || 280)}</div><div class="finance-label">Mensalidade</div></div>
+        <div class="finance-card"><div class="finance-value">${freq}x</div><div class="finance-label">Por Semana</div></div>
+        <div class="finance-card"><div class="finance-value">${formatarMoeda(valorMensalidade)}</div><div class="finance-label">Mensalidade</div></div>
       </div>
       <div class="card" style="margin-bottom: 16px;">
         <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-muted);">Vencimento</span><strong>Dia ${c.DiaVencimento || 10}</strong></div>
-        <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span style="color: var(--text-muted);">Sua Comissão</span><strong style="color: var(--pilates);">${formatarMoeda((CONFIG.PLANOS_PILATES[c.FrequenciaSemanal] || 280) * CONFIG.COMISSAO_PILATES)}</strong></div>
+        <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span style="color: var(--text-muted);">Sua Comissão</span><strong style="color: var(--pilates);">${formatarMoeda(valorMensalidade * CONFIG.COMISSAO_PILATES)}</strong></div>
       </div>
     `;
   } else if (tipo === 'reabilitacao' && c.pacote) {
@@ -804,25 +839,25 @@ async function abrirDetalheCliente(clienteId) {
       <div style="width: 60px; height: 60px; border-radius: 50%; background: var(--${tipo}); color: white; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 1.5rem; font-family: 'Cormorant Garamond', serif;">${(c.Nome || 'C').charAt(0)}</div>
       <div style="font-size: 1.4rem; font-weight: 600; color: var(--text-dark); font-family: 'Cormorant Garamond', serif;">${c.Nome}</div>
       <span class="card-badge ${tipo}" style="margin-top: 8px; display: inline-block;">${formatarTipo(tipo)}</span>
-      ${c.Pausado ? '<div class="status-badge status-pausado" style="margin-top: 8px;">⏸️ Pausado</div>' : ''}
+      ${c.Pausado === true || c.Pausado === 'TRUE' ? '<div class="status-badge status-pausado" style="margin-top: 8px;">⏸️ Pausado</div>' : ''}
     </div>
     <div class="card" style="margin-bottom: 16px;">
       <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;"><span class="material-icons-round" style="color: var(--text-muted);">phone</span><span>${c.Telefone || 'Sem telefone'}</span></div>
       ${c.Endereco ? `<div style="display: flex; align-items: center; gap: 8px;"><span class="material-icons-round" style="color: var(--text-muted);">location_on</span><span>${c.Endereco}</span></div>` : ''}
     </div>
     ${infoEspecifica}
-    ${c.AgendaFixa ? `<div class="card" style="margin-bottom: 16px;"><div class="card-title" style="margin-bottom: 8px;">📅 Horários Fixos</div><div style="color: var(--text-medium);">${c.AgendaFixa}</div></div>` : ''}
+    ${c.AgendaFixa ? `<div class="card" style="margin-bottom: 16px;"><div class="card-title" style="margin-bottom: 8px;">📅 Horários Fixos</div><div style="color: var(--text-medium);">${c.AgendaFixa.replace(/,/g, ' | ').replace(/:/g, ' ')}</div></div>` : ''}
     <div class="form-actions" style="margin-bottom: 12px;">
       <button class="btn btn-primary" onclick="abrirWhatsApp('${c.Telefone}')"><span class="material-icons-round">send</span> WhatsApp</button>
       <button class="btn btn-secondary" onclick="toast('Em desenvolvimento', 'info')"><span class="material-icons-round">edit</span> Editar</button>
     </div>
-    <button class="btn ${c.Pausado ? 'btn-primary' : 'btn-accent'} btn-block" onclick="togglePausaCliente('${c.ClienteID}', ${!!c.Pausado})">
-      <span class="material-icons-round">${c.Pausado ? 'play_arrow' : 'pause'}</span> ${c.Pausado ? 'Reativar' : 'Pausar'} Cliente
+    <button class="btn ${c.Pausado === true || c.Pausado === 'TRUE' ? 'btn-primary' : 'btn-accent'} btn-block" onclick="togglePausaCliente('${c.ClienteID}')">
+      <span class="material-icons-round">${c.Pausado === true || c.Pausado === 'TRUE' ? 'play_arrow' : 'pause'}</span> ${c.Pausado === true || c.Pausado === 'TRUE' ? 'Reativar' : 'Pausar'} Cliente
     </button>
   `);
 }
 
-async function togglePausaCliente(clienteId, pausadoAtualmente) {
+async function togglePausaCliente(clienteId) {
   const result = await apiCall('togglePausaCliente', { id: clienteId });
   
   if (result.success) {
@@ -859,9 +894,7 @@ function abrirDetalheAtendimento(agendamentoId) {
         <span style="color: ${ag.Status === 'Realizado' ? 'var(--success)' : 'var(--danger)'}; font-weight: 600;">${ag.Status === 'Realizado' ? '✓ Atendimento Realizado' : '✗ Falta Registrada'}</span>
       </div>
     `}
-    <button class="btn btn-outline btn-block" onclick="fecharModal(); abrirDetalheCliente('${ag.ClienteID}')">
-      <span class="material-icons-round">person</span> Ver Perfil do Cliente
-    </button>
+    ${ag.ClienteID ? `<button class="btn btn-outline btn-block" onclick="fecharModal(); abrirDetalheCliente('${ag.ClienteID}')"><span class="material-icons-round">person</span> Ver Perfil do Cliente</button>` : ''}
   `);
 }
 
@@ -909,7 +942,7 @@ async function salvarAulaAvulsa(event) {
   });
   
   if (result.success) {
-    toast(`Aula avulsa registrada! Comissão: ${formatarMoeda(result.data?.Comissao || 10.80)}`, 'success');
+    toast(`Aula registrada! Comissão: ${formatarMoeda(result.data?.Comissao || 10.80)}`, 'success');
     fecharModal();
   } else {
     toast('Erro: ' + (result.error || 'Tente novamente'), 'error');
@@ -1067,7 +1100,7 @@ function abrirConfiguracoes() {
       </button>
     </div>
     <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--cream); text-align: center;">
-      <p style="font-size: 0.8rem; color: var(--text-muted);">Dr. Lucas Cordeiro - Fisioterapeuta<br>Versão 1.0.0</p>
+      <p style="font-size: 0.8rem; color: var(--text-muted);">Dr. Lucas Cordeiro - Fisioterapeuta<br>Versão 1.1.0</p>
     </div>
   `);
 }
