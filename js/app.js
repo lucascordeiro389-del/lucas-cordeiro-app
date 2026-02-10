@@ -1,18 +1,20 @@
-
 /* ============================================
    DR. LUCAS CORDEIRO - FISIOTERAPEUTA
    Sistema de Gestão - JavaScript
+   VERSÃO COM API REAL
    ============================================ */
 
 // ============================================
 // CONFIGURAÇÕES E ESTADO
 // ============================================
 const CONFIG = {
-  API_URL: 'https://script.google.com/macros/s/AKfycbyH41V8Zk1_vlJuBq6B-76LScUFIuR3ZaY0HongKxtZfZAIg-p7U6_wetowESoCVjApww/exec',
+  // URL do Google Apps Script
+  API_URL: localStorage.getItem('apiUrl') || '',
+  
   COMISSAO_PILATES: 0.40,
   VALOR_AULA_AVULSA: 27.00,
   PLANOS_PILATES: { 1: 180.00, 2: 280.00, 3: 380.00 },
-  HORARIOS: ['07:00', '08:00', '09:00', '10:00', '11:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'],
+  HORARIOS: ['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'],
   DIAS_SEMANA: ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB']
 };
 
@@ -26,13 +28,49 @@ const state = {
 };
 
 // ============================================
+// API - CONEXÃO COM GOOGLE SHEETS
+// ============================================
+async function apiCall(action, params = {}) {
+  if (!CONFIG.API_URL) {
+    console.warn('API não configurada');
+    toast('Configure a API em Configurações', 'warning');
+    return { success: false, error: 'API não configurada' };
+  }
+  
+  try {
+    const response = await fetch(CONFIG.API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain',
+      },
+      body: JSON.stringify({ action, params })
+    });
+    
+    const result = await response.json();
+    console.log(`API ${action}:`, result);
+    return result;
+  } catch (error) {
+    console.error('Erro na API:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// ============================================
 // INICIALIZAÇÃO
 // ============================================
 function inicializarApp() {
+  // Carrega URL da API salva
+  CONFIG.API_URL = localStorage.getItem('apiUrl') || '';
+  
   atualizarDataHeader();
   carregarAgendaHoje();
   setInterval(atualizarDataHeader, 60000);
-  CONFIG.API_URL = localStorage.getItem('apiUrl') || '';
+  
+  if (!CONFIG.API_URL) {
+    setTimeout(() => {
+      toast('Configure a URL da API em Configurações', 'info');
+    }, 2000);
+  }
 }
 
 function atualizarDataHeader() {
@@ -66,17 +104,25 @@ async function carregarAgendaHoje() {
   const container = document.getElementById('hojeContent');
   container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   
-  const agendamentos = gerarDadosExemplo();
-  state.agendaHoje = agendamentos;
-  atualizarStatsHoje(agendamentos);
-  renderizarAgendaHoje(agendamentos);
+  const result = await apiCall('getAgendaHoje');
+  
+  if (result.success && result.data) {
+    state.agendaHoje = result.data;
+    atualizarStatsHoje(result.data);
+    renderizarAgendaHoje(result.data);
+  } else {
+    // Se não tem API ou deu erro, mostra vazio
+    state.agendaHoje = [];
+    atualizarStatsHoje([]);
+    renderizarAgendaHoje([]);
+  }
 }
 
 function atualizarStatsHoje(agendamentos) {
   const stats = {
-    pilates: agendamentos.filter(a => a.tipo === 'pilates').length,
-    reab: agendamentos.filter(a => a.tipo === 'reabilitacao').length,
-    terapia: agendamentos.filter(a => a.tipo === 'terapia').length
+    pilates: agendamentos.filter(a => a.Tipo === 'pilates').length,
+    reab: agendamentos.filter(a => a.Tipo === 'reabilitacao').length,
+    terapia: agendamentos.filter(a => a.Tipo === 'terapia').length
   };
   
   document.getElementById('hojeStats').innerHTML = `
@@ -94,7 +140,7 @@ function renderizarAgendaHoje(agendamentos) {
       <div class="empty-state">
         <span class="material-icons-round">event_available</span>
         <h3>Nenhum atendimento hoje</h3>
-        <p>Aproveite o dia livre!</p>
+        <p>Clique no + para agendar</p>
       </div>
     `;
     return;
@@ -102,7 +148,7 @@ function renderizarAgendaHoje(agendamentos) {
   
   const porHorario = {};
   agendamentos.forEach(ag => {
-    const hora = ag.hora || '08:00';
+    const hora = ag.Hora || '08:00';
     if (!porHorario[hora]) porHorario[hora] = [];
     porHorario[hora].push(ag);
   });
@@ -121,19 +167,19 @@ function renderizarAgendaHoje(agendamentos) {
     `;
     
     ags.forEach(ag => {
-      const statusClass = ag.status === 'realizado' ? 'realizado' : ag.status === 'faltou' ? 'faltou' : '';
+      const tipo = ag.Tipo || 'terapia';
+      const statusClass = ag.Status === 'Realizado' ? 'realizado' : ag.Status === 'Faltou' ? 'faltou' : '';
       html += `
-        <div class="atendimento-card ${ag.tipo} ${statusClass}" onclick="abrirDetalheAtendimento('${ag.id}')">
-          <div class="atendimento-nome">${ag.nome}</div>
+        <div class="atendimento-card ${tipo} ${statusClass}" onclick="abrirDetalheAtendimento('${ag.AgendamentoID}')">
+          <div class="atendimento-nome">${ag.NomeCliente || 'Cliente'}</div>
           <div class="atendimento-info">
-            <span>${ag.tipo === 'pilates' ? '🧘' : ag.tipo === 'reabilitacao' ? '🏥' : '💆'}</span>
-            <span>${ag.local === 'domicilio' ? '🏠 Domicílio' : '🏢 Clínica'}</span>
-            ${ag.tipo === 'pilates' ? `<span>👥 ${ag.totalAlunos || 1}/4</span>` : ''}
+            <span>${tipo === 'pilates' ? '🧘' : tipo === 'reabilitacao' ? '🏥' : '💆'}</span>
+            <span>${ag.Local === 'domicilio' ? '🏠 Domicílio' : '🏢 Clínica'}</span>
           </div>
-          ${ag.status !== 'realizado' && ag.status !== 'faltou' ? `
+          ${ag.Status !== 'Realizado' && ag.Status !== 'Faltou' && ag.Status !== 'FaltaJustificada' ? `
             <div class="atendimento-actions">
-              <button class="atendimento-btn" onclick="event.stopPropagation(); marcarRealizado('${ag.id}')">✓ Realizado</button>
-              <button class="atendimento-btn" onclick="event.stopPropagation(); abrirModalFalta('${ag.id}')">✗ Falta</button>
+              <button class="atendimento-btn" onclick="event.stopPropagation(); marcarRealizado('${ag.AgendamentoID}')">✓ Realizado</button>
+              <button class="atendimento-btn" onclick="event.stopPropagation(); abrirModalFalta('${ag.AgendamentoID}')">✗ Falta</button>
             </div>
           ` : ''}
         </div>
@@ -161,7 +207,9 @@ async function carregarAgendaSemanal() {
   document.getElementById('weekTitle').textContent = 
     `${inicioSemana.getDate()}/${inicioSemana.getMonth() + 1} - ${fimSemana.getDate()}/${fimSemana.getMonth() + 1}`;
   
-  const agendamentos = gerarDadosExemploSemana(inicioSemana);
+  const result = await apiCall('getAgendaSemana', { inicioSemana: formatarData(inicioSemana) });
+  const agendamentos = result.success ? (result.data || []) : [];
+  
   renderizarAgendaSemanal(inicioSemana, agendamentos);
 }
 
@@ -192,15 +240,16 @@ function renderizarAgendaSemanal(inicioSemana, agendamentos) {
       const dia = new Date(inicioSemana);
       dia.setDate(inicioSemana.getDate() + i);
       const dataStr = formatarData(dia);
-      const ags = agendamentos.filter(a => a.data === dataStr && a.hora === hora);
+      const ags = agendamentos.filter(a => a.Data === dataStr && a.Hora === hora);
       
       html += `<div class="agenda-slot ${ags.length === 0 ? 'vazio' : ''}" onclick="abrirModalNovoAgendamento('${dataStr}', '${hora}')">`;
       
       ags.forEach(ag => {
+        const tipo = ag.Tipo || 'terapia';
         html += `
-          <div class="agenda-item ${ag.tipo} ${ag.status === 'realizado' ? 'realizado' : ''}" 
-               onclick="event.stopPropagation(); abrirDetalheAtendimento('${ag.id}')" title="${ag.nome}">
-            ${ag.nome.split(' ')[0]}
+          <div class="agenda-item ${tipo} ${ag.Status === 'Realizado' ? 'realizado' : ''}" 
+               onclick="event.stopPropagation(); abrirDetalheAtendimento('${ag.AgendamentoID}')" title="${ag.NomeCliente}">
+            ${(ag.NomeCliente || 'Cliente').split(' ')[0]}
           </div>
         `;
       });
@@ -230,9 +279,15 @@ async function carregarClientes() {
   const container = document.getElementById('clientesContent');
   container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   
-  const clientes = gerarClientesExemplo();
-  state.clientes = clientes;
-  renderizarClientes(clientes);
+  const result = await apiCall('getClientes');
+  
+  if (result.success && result.data) {
+    state.clientes = result.data;
+    renderizarClientes(result.data);
+  } else {
+    state.clientes = [];
+    renderizarClientes([]);
+  }
 }
 
 function renderizarClientes(clientes) {
@@ -240,13 +295,13 @@ function renderizarClientes(clientes) {
   
   let clientesFiltrados = clientes;
   if (state.filtroClientes !== 'todos') {
-    clientesFiltrados = clientes.filter(c => c.tipo === state.filtroClientes);
+    clientesFiltrados = clientes.filter(c => c.Tipo === state.filtroClientes);
   }
   
   const busca = document.getElementById('clienteSearch')?.value?.toLowerCase() || '';
   if (busca) {
     clientesFiltrados = clientesFiltrados.filter(c => 
-      c.nome.toLowerCase().includes(busca) || c.telefone?.includes(busca)
+      (c.Nome || '').toLowerCase().includes(busca) || (c.Telefone || '').includes(busca)
     );
   }
   
@@ -255,42 +310,39 @@ function renderizarClientes(clientes) {
       <div class="empty-state">
         <span class="material-icons-round">person_search</span>
         <h3>Nenhum cliente encontrado</h3>
-        <p>Tente outra busca ou adicione um novo cliente</p>
+        <p>Clique no + para cadastrar</p>
       </div>
     `;
     return;
   }
   
-  container.innerHTML = clientesFiltrados.map(c => `
-    <div class="card ${c.tipo}" onclick="abrirDetalheCliente('${c.id}')">
-      <div class="card-header">
-        <div class="card-title">${c.nome}</div>
-        <span class="card-badge ${c.tipo}">${formatarTipo(c.tipo)}</span>
-      </div>
-      <div class="card-info">
-        <span class="card-info-item">
-          <span class="material-icons-round">phone</span>
-          ${c.telefone || 'Sem telefone'}
-        </span>
-        ${c.tipo === 'pilates' ? `
+  container.innerHTML = clientesFiltrados.map(c => {
+    const tipo = c.Tipo || 'terapia';
+    return `
+      <div class="card ${tipo}" onclick="abrirDetalheCliente('${c.ClienteID}')">
+        <div class="card-header">
+          <div class="card-title">${c.Nome || 'Cliente'}</div>
+          <span class="card-badge ${tipo}">${formatarTipo(tipo)}</span>
+        </div>
+        <div class="card-info">
           <span class="card-info-item">
-            <span class="material-icons-round">event</span>
-            ${c.frequenciaSemanal}x/semana
+            <span class="material-icons-round">phone</span>
+            ${c.Telefone || 'Sem telefone'}
           </span>
-          <span class="card-info-item status-badge status-${c.statusPagamento}">
-            ${c.statusPagamento === 'pago' ? '✓ Pago' : c.statusPagamento === 'atrasado' ? '! Atrasado' : '⏳ Pendente'}
-          </span>
-        ` : ''}
-        ${c.tipo === 'reabilitacao' && c.pacote ? `
-          <span class="card-info-item">
-            <span class="material-icons-round">inventory_2</span>
-            ${c.pacote.sessoesRestantes}/${c.pacote.totalSessoes} sessões
-          </span>
-        ` : ''}
-        ${c.pausado ? '<span class="card-info-item status-badge status-pausado">⏸️ Pausado</span>' : ''}
+          ${tipo === 'pilates' ? `
+            <span class="card-info-item">
+              <span class="material-icons-round">event</span>
+              ${c.FrequenciaSemanal || 2}x/semana
+            </span>
+            <span class="card-info-item status-badge status-${c.statusPagamento || 'pendente'}">
+              ${c.statusPagamento === 'pago' ? '✓ Pago' : c.statusPagamento === 'atrasado' ? '! Atrasado' : '⏳ Pendente'}
+            </span>
+          ` : ''}
+          ${c.Pausado ? '<span class="card-info-item status-badge status-pausado">⏸️ Pausado</span>' : ''}
+        </div>
       </div>
-    </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 function buscarClientes() {
@@ -310,12 +362,13 @@ function filtrarClientes(filtro) {
 // ============================================
 async function carregarFinanceiro() {
   const container = document.getElementById('financeiroContent');
+  container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
   
   switch(state.filtroFinanceiro) {
-    case 'resumo': renderizarResumoFinanceiro(container); break;
-    case 'mensalidades': renderizarMensalidades(container); break;
-    case 'pacotes': renderizarPacotes(container); break;
-    case 'comissoes': renderizarComissoes(container); break;
+    case 'resumo': await renderizarResumoFinanceiro(container); break;
+    case 'mensalidades': await renderizarMensalidades(container); break;
+    case 'pacotes': await renderizarPacotes(container); break;
+    case 'comissoes': await renderizarComissoes(container); break;
   }
 }
 
@@ -327,8 +380,15 @@ function filtrarFinanceiro(filtro) {
   carregarFinanceiro();
 }
 
-function renderizarResumoFinanceiro(container) {
-  const dados = { totalMes: 3250.00, recebido: 2100.00, pendente: 1150.00, comissoes: 840.00, atendimentos: 45 };
+async function renderizarResumoFinanceiro(container) {
+  const result = await apiCall('getResumoFinanceiro', { 
+    mes: new Date().getMonth() + 1, 
+    ano: new Date().getFullYear() 
+  });
+  
+  const dados = result.success && result.data ? result.data : {
+    totalMes: 0, recebido: 0, pendente: 0, comissoes: 0, atendimentos: 0
+  };
   
   container.innerHTML = `
     <div class="finance-summary">
@@ -353,74 +413,98 @@ function renderizarResumoFinanceiro(container) {
         <div class="finance-label">Atendimentos</div>
       </div>
     </div>
-    
-    <h3 style="font-family: 'Cormorant Garamond', serif; margin: 20px 0 12px; color: var(--text-dark);">Próximos Vencimentos</h3>
-    
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">Maria Silva</div>
-        <span class="status-badge status-pendente">Vence em 3 dias</span>
-      </div>
-      <div class="card-info">
-        <span>Pilates 2x/semana</span>
-        <span style="font-weight: 600; color: var(--primary);">${formatarMoeda(280)}</span>
-      </div>
-    </div>
-    
-    <div class="card">
-      <div class="card-header">
-        <div class="card-title">João Santos</div>
-        <span class="status-badge status-atrasado">Atrasado 5 dias</span>
-      </div>
-      <div class="card-info">
-        <span>Pilates 3x/semana</span>
-        <span style="font-weight: 600; color: var(--danger);">${formatarMoeda(380)}</span>
-      </div>
-    </div>
   `;
 }
 
-function renderizarMensalidades(container) {
-  container.innerHTML = `<div class="empty-state"><span class="material-icons-round">payments</span><h3>Mensalidades</h3><p>Configure a API para ver os dados</p></div>`;
+async function renderizarMensalidades(container) {
+  const result = await apiCall('getMensalidades', { 
+    mes: new Date().getMonth() + 1, 
+    ano: new Date().getFullYear() 
+  });
+  
+  const mensalidades = result.success && result.data ? result.data : [];
+  
+  if (mensalidades.length === 0) {
+    container.innerHTML = `<div class="empty-state"><span class="material-icons-round">payments</span><h3>Nenhuma mensalidade</h3></div>`;
+    return;
+  }
+  
+  container.innerHTML = mensalidades.map(m => `
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">${m.NomeCliente}</div>
+        <span class="status-badge status-${m.Status === 'Pago' ? 'pago' : m.Status === 'Atrasado' ? 'atrasado' : 'pendente'}">
+          ${m.Status}
+        </span>
+      </div>
+      <div class="card-info">
+        <span>Vencimento: ${new Date(m.Vencimento).toLocaleDateString('pt-BR')}</span>
+        <span style="font-weight: 600; color: var(--primary);">${formatarMoeda(m.Valor)}</span>
+      </div>
+      ${m.Status !== 'Pago' ? `
+        <button class="btn btn-sm btn-primary" style="margin-top: 8px;" onclick="registrarPagamento('${m.MensalidadeID}')">
+          Registrar Pagamento
+        </button>
+      ` : ''}
+    </div>
+  `).join('');
 }
 
-function renderizarPacotes(container) {
-  container.innerHTML = `<div class="empty-state"><span class="material-icons-round">inventory_2</span><h3>Pacotes de Reabilitação</h3><p>Configure a API para ver os dados</p></div>`;
+async function renderizarPacotes(container) {
+  const result = await apiCall('getPacotes', { status: 'Ativo' });
+  const pacotes = result.success && result.data ? result.data : [];
+  
+  if (pacotes.length === 0) {
+    container.innerHTML = `<div class="empty-state"><span class="material-icons-round">inventory_2</span><h3>Nenhum pacote ativo</h3></div>`;
+    return;
+  }
+  
+  container.innerHTML = pacotes.map(p => {
+    const percentual = (p.SessoesRestantes / p.TotalSessoes) * 100;
+    return `
+      <div class="card reabilitacao">
+        <div class="card-header">
+          <div class="card-title">${p.NomeCliente}</div>
+          <span>${p.SessoesRestantes}/${p.TotalSessoes}</span>
+        </div>
+        <div style="background: var(--cream); border-radius: 4px; height: 8px; overflow: hidden; margin: 8px 0;">
+          <div style="background: var(--reabilitacao); height: 100%; width: ${percentual}%;"></div>
+        </div>
+        <div class="card-info">
+          <span>Validade: ${new Date(p.Validade).toLocaleDateString('pt-BR')}</span>
+          <span>${formatarMoeda(p.ValorTotal)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
-function renderizarComissoes(container) {
+async function renderizarComissoes(container) {
+  const result = await apiCall('getComissoes', { 
+    mes: new Date().getMonth() + 1, 
+    ano: new Date().getFullYear() 
+  });
+  
+  const dados = result.success && result.data ? result.data : {
+    totalComissoes: 0,
+    mensalidades: { total: 0, quantidade: 0 },
+    aulasAvulsas: { total: 0, quantidade: 0 }
+  };
+  
   container.innerHTML = `
     <div class="finance-summary">
       <div class="finance-card highlight" style="background: linear-gradient(145deg, var(--pilates) 0%, #5a4a8a 100%);">
-        <div class="finance-value">${formatarMoeda(840)}</div>
+        <div class="finance-value">${formatarMoeda(dados.totalComissoes)}</div>
         <div class="finance-label">Comissões do Mês</div>
       </div>
       <div class="finance-card">
-        <div class="finance-value">${formatarMoeda(720)}</div>
+        <div class="finance-value">${formatarMoeda(dados.mensalidades?.total || 0)}</div>
         <div class="finance-label">Mensalidades (40%)</div>
       </div>
       <div class="finance-card">
-        <div class="finance-value">${formatarMoeda(120)}</div>
+        <div class="finance-value">${formatarMoeda(dados.aulasAvulsas?.total || 0)}</div>
         <div class="finance-label">Aulas Avulsas</div>
       </div>
-    </div>
-    
-    <h3 style="font-family: 'Cormorant Garamond', serif; margin: 20px 0 12px; color: var(--text-dark);">Detalhamento</h3>
-    
-    <div class="card pilates">
-      <div class="card-header">
-        <div class="card-title">Mensalidades</div>
-        <span style="font-weight: 600; color: var(--pilates);">${formatarMoeda(720)}</span>
-      </div>
-      <div class="card-info"><span>6 alunos × 40% média</span></div>
-    </div>
-    
-    <div class="card pilates">
-      <div class="card-header">
-        <div class="card-title">Aulas Avulsas</div>
-        <span style="font-weight: 600; color: var(--pilates);">${formatarMoeda(120)}</span>
-      </div>
-      <div class="card-info"><span>11 aulas × R$ 10,80</span></div>
     </div>
   `;
 }
@@ -483,7 +567,7 @@ function abrirModalNovoCliente(tipo) {
       </div>
       <div class="form-group">
         <label class="form-label">Dia do Vencimento</label>
-        <input type="number" class="form-input" name="diaVencimento" min="1" max="31" placeholder="Ex: 10">
+        <input type="number" class="form-input" name="diaVencimento" min="1" max="31" placeholder="Ex: 10" value="10">
       </div>
       <div class="form-group">
         <label class="form-label">Horários Fixos</label>
@@ -503,8 +587,8 @@ function abrirModalNovoCliente(tipo) {
       <div class="form-group">
         <label class="form-label">Pacote</label>
         <div class="form-row">
-          <div><label class="form-label" style="font-size: 0.7rem;">Nº de Sessões</label><input type="number" class="form-input" name="totalSessoes" placeholder="Ex: 10"></div>
-          <div><label class="form-label" style="font-size: 0.7rem;">Valor Total</label><input type="text" class="form-input" name="valorPacote" placeholder="Ex: 800,00"></div>
+          <div><label class="form-label" style="font-size: 0.7rem;">Nº de Sessões</label><input type="number" class="form-input" name="totalSessoes" placeholder="Ex: 10" value="10"></div>
+          <div><label class="form-label" style="font-size: 0.7rem;">Valor Total</label><input type="number" class="form-input" name="valorPacote" placeholder="Ex: 800" step="0.01"></div>
         </div>
       </div>
       <div class="form-group">
@@ -528,7 +612,7 @@ function abrirModalNovoCliente(tipo) {
       </div>
       <div class="form-group">
         <label class="form-label">Valor por Sessão</label>
-        <input type="text" class="form-input" name="valorSessao" placeholder="Ex: 120,00">
+        <input type="number" class="form-input" name="valorSessao" placeholder="Ex: 120" step="0.01">
       </div>
     `;
   }
@@ -537,7 +621,7 @@ function abrirModalNovoCliente(tipo) {
     <form id="formNovoCliente" onsubmit="salvarCliente(event, '${tipo}')">
       <input type="hidden" name="tipo" value="${tipo}">
       <div class="form-group">
-        <label class="form-label">Nome Completo</label>
+        <label class="form-label">Nome Completo *</label>
         <input type="text" class="form-input" name="nome" required placeholder="Nome do ${tipo === 'pilates' ? 'aluno' : 'paciente'}">
       </div>
       <div class="form-group">
@@ -579,66 +663,65 @@ function toggleHorarioDia(dia, checked) {
   if (input) { input.disabled = !checked; input.style.opacity = checked ? '1' : '0.5'; }
 }
 
-function abrirModalAulaAvulsa() {
-  abrirModal('📝 Aula Avulsa', `
-    <form id="formAulaAvulsa" onsubmit="salvarAulaAvulsa(event)">
-      <div class="form-group">
-        <label class="form-label">Nome do Aluno</label>
-        <input type="text" class="form-input" name="nomeAluno" required placeholder="Nome do aluno">
-        <div class="form-hint">Aluno de outra fisioterapeuta</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Data da Aula</label>
-        <input type="date" class="form-input" name="data" required value="${formatarData(new Date())}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Horário</label>
-        <input type="time" class="form-input" name="hora" required value="08:00">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Valor da Aula</label>
-        <input type="text" class="form-input" name="valor" value="27,00" required>
-        <div class="form-hint">Sua comissão: ${formatarMoeda(CONFIG.VALOR_AULA_AVULSA * CONFIG.COMISSAO_PILATES)}</div>
-      </div>
-      <div class="form-actions">
-        <button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
-        <button type="submit" class="btn btn-primary"><span class="material-icons-round">check</span> Registrar</button>
-      </div>
-    </form>
-  `);
-}
-
-function abrirDetalheAtendimento(id) {
-  const ag = state.agendaHoje.find(a => a.id === id);
-  if (!ag) return;
+async function salvarCliente(event, tipo) {
+  event.preventDefault();
+  const form = event.target;
+  const formData = new FormData(form);
   
-  abrirModal('Detalhes', `
-    <div style="text-align: center; padding: 16px; background: var(--cream-light); border-radius: var(--radius); margin-bottom: 16px;">
-      <div style="font-size: 1.4rem; font-weight: 600; color: var(--text-dark); font-family: 'Cormorant Garamond', serif;">${ag.nome}</div>
-      <div style="color: var(--text-muted); margin-top: 4px;">${ag.hora} • ${formatarTipo(ag.tipo)}</div>
-      <span class="card-badge ${ag.tipo}" style="margin-top: 8px; display: inline-block;">${ag.local === 'domicilio' ? '🏠 Domicílio' : '🏢 Clínica'}</span>
-    </div>
-    ${ag.status !== 'realizado' && ag.status !== 'faltou' ? `
-      <div class="form-actions" style="margin-bottom: 16px;">
-        <button class="btn btn-primary" onclick="marcarRealizado('${ag.id}')"><span class="material-icons-round">check_circle</span> Realizado</button>
-        <button class="btn btn-accent" onclick="abrirModalFalta('${ag.id}')"><span class="material-icons-round">cancel</span> Falta</button>
-      </div>
-    ` : `
-      <div style="text-align: center; padding: 12px; background: ${ag.status === 'realizado' ? 'var(--primary-ultra-light)' : 'rgba(199, 107, 107, 0.1)'}; border-radius: var(--radius); margin-bottom: 16px;">
-        <span style="color: ${ag.status === 'realizado' ? 'var(--success)' : 'var(--danger)'}; font-weight: 600;">${ag.status === 'realizado' ? '✓ Atendimento Realizado' : '✗ Falta Registrada'}</span>
-      </div>
-    `}
-    <button class="btn btn-outline btn-block" onclick="fecharModal(); abrirDetalheCliente('${ag.clienteId}')">
-      <span class="material-icons-round">person</span> Ver Perfil do ${ag.tipo === 'pilates' ? 'Aluno' : 'Paciente'}
-    </button>
-  `);
+  // Monta horários
+  const horarios = {};
+  ['SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SAB'].forEach(dia => {
+    if (formData.get('dia_' + dia)) {
+      horarios[dia] = formData.get('hora_' + dia) || '08:00';
+    }
+  });
+  
+  const dados = {
+    Nome: formData.get('nome'),
+    Telefone: formData.get('telefone'),
+    Endereco: formData.get('endereco'),
+    Tipo: tipo,
+    Local: formData.get('local') || 'clinica',
+    FrequenciaSemanal: formData.get('frequencia') || 2,
+    DiaVencimento: formData.get('diaVencimento') || 10,
+    ValorSessao: formData.get('valorSessao'),
+    TotalSessoes: formData.get('totalSessoes'),
+    ValorPacote: formData.get('valorPacote'),
+    ValidadePacote: formData.get('validadePacote'),
+    Observacoes: formData.get('observacoes'),
+    horarios: horarios
+  };
+  
+  const result = await apiCall('createCliente', dados);
+  
+  if (result.success) {
+    toast('Cliente cadastrado com sucesso!', 'success');
+    fecharModal();
+    carregarClientes();
+    carregarAgendaHoje();
+  } else {
+    toast('Erro ao cadastrar: ' + (result.error || 'Tente novamente'), 'error');
+  }
 }
 
-function abrirModalFalta(id) {
-  abrirModal('Falta', `
+// ============================================
+// AÇÕES
+// ============================================
+async function marcarRealizado(agendamentoId) {
+  const result = await apiCall('marcarRealizado', { id: agendamentoId });
+  
+  if (result.success) {
+    toast('Atendimento realizado!', 'success');
+    carregarAgendaHoje();
+  } else {
+    toast('Erro: ' + (result.error || 'Tente novamente'), 'error');
+  }
+}
+
+function abrirModalFalta(agendamentoId) {
+  abrirModal('Registrar Falta', `
     <div style="text-align: center; margin-bottom: 20px;">
       <span class="material-icons-round" style="font-size: 3rem; color: var(--warning);">warning</span>
-      <h3 style="margin-top: 12px; font-family: 'Cormorant Garamond', serif;">Registrar Falta</h3>
     </div>
     <div class="form-group">
       <label class="form-label">Tipo de Falta</label>
@@ -661,187 +744,462 @@ function abrirModalFalta(id) {
     </div>
     <div class="form-actions">
       <button class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
-      <button class="btn btn-accent" onclick="confirmarFalta('${id}')"><span class="material-icons-round">check</span> Confirmar</button>
+      <button class="btn btn-accent" onclick="confirmarFalta('${agendamentoId}')">Confirmar</button>
     </div>
   `);
 }
 
-function abrirDetalheCliente(id) {
-  const cliente = state.clientes.find(c => c.id === id) || gerarClientesExemplo().find(c => c.id === id);
-  if (cliente) renderizarDetalheCliente(cliente);
+async function confirmarFalta(agendamentoId) {
+  const tipoFalta = document.querySelector('input[name="tipoFalta"]:checked')?.value || 'naoJustificada';
+  
+  const result = await apiCall('marcarFalta', { id: agendamentoId, tipoFalta });
+  
+  if (result.success) {
+    toast(result.message || 'Falta registrada', tipoFalta === 'justificada' ? 'warning' : 'info');
+    fecharModal();
+    carregarAgendaHoje();
+  } else {
+    toast('Erro: ' + (result.error || 'Tente novamente'), 'error');
+  }
 }
 
-function renderizarDetalheCliente(c) {
+async function abrirDetalheCliente(clienteId) {
+  const result = await apiCall('getCliente', { id: clienteId });
+  
+  if (!result.success || !result.data) {
+    toast('Cliente não encontrado', 'error');
+    return;
+  }
+  
+  const c = result.data;
+  const tipo = c.Tipo || 'terapia';
+  
   let infoEspecifica = '';
   
-  if (c.tipo === 'pilates') {
+  if (tipo === 'pilates') {
     infoEspecifica = `
       <div class="finance-summary" style="margin-bottom: 16px;">
-        <div class="finance-card"><div class="finance-value">${c.frequenciaSemanal}x</div><div class="finance-label">Por Semana</div></div>
-        <div class="finance-card"><div class="finance-value">${formatarMoeda(CONFIG.PLANOS_PILATES[c.frequenciaSemanal])}</div><div class="finance-label">Mensalidade</div></div>
+        <div class="finance-card"><div class="finance-value">${c.FrequenciaSemanal || 2}x</div><div class="finance-label">Por Semana</div></div>
+        <div class="finance-card"><div class="finance-value">${formatarMoeda(CONFIG.PLANOS_PILATES[c.FrequenciaSemanal] || 280)}</div><div class="finance-label">Mensalidade</div></div>
       </div>
       <div class="card" style="margin-bottom: 16px;">
-        <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-muted);">Vencimento</span><strong>Dia ${c.diaVencimento}</strong></div>
-        <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span style="color: var(--text-muted);">Status</span><span class="status-badge status-${c.statusPagamento}">${c.statusPagamento === 'pago' ? '✓ Pago' : c.statusPagamento === 'atrasado' ? '! Atrasado' : '⏳ Pendente'}</span></div>
-        <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span style="color: var(--text-muted);">Sua Comissão</span><strong style="color: var(--pilates);">${formatarMoeda(CONFIG.PLANOS_PILATES[c.frequenciaSemanal] * CONFIG.COMISSAO_PILATES)}</strong></div>
+        <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-muted);">Vencimento</span><strong>Dia ${c.DiaVencimento || 10}</strong></div>
+        <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span style="color: var(--text-muted);">Sua Comissão</span><strong style="color: var(--pilates);">${formatarMoeda((CONFIG.PLANOS_PILATES[c.FrequenciaSemanal] || 280) * CONFIG.COMISSAO_PILATES)}</strong></div>
       </div>
-      ${c.reposicoePendentes > 0 ? `<div class="card" style="border-left-color: var(--warning); margin-bottom: 16px;"><div style="color: var(--warning); font-weight: 600;"><span class="material-icons-round" style="vertical-align: middle;">event_repeat</span> ${c.reposicoePendentes} reposição pendente</div></div>` : ''}
     `;
-  } else if (c.tipo === 'reabilitacao' && c.pacote) {
-    const percentual = (c.pacote.sessoesRestantes / c.pacote.totalSessoes) * 100;
+  } else if (tipo === 'reabilitacao' && c.pacote) {
+    const percentual = (c.pacote.SessoesRestantes / c.pacote.TotalSessoes) * 100;
     infoEspecifica = `
       <div class="card" style="margin-bottom: 16px;">
         <div class="card-title" style="margin-bottom: 12px;">📦 Pacote</div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;"><span style="color: var(--text-muted);">Sessões</span><strong>${c.pacote.sessoesRestantes}/${c.pacote.totalSessoes} restantes</strong></div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;"><span style="color: var(--text-muted);">Sessões</span><strong>${c.pacote.SessoesRestantes}/${c.pacote.TotalSessoes} restantes</strong></div>
         <div style="background: var(--cream); border-radius: 4px; height: 8px; overflow: hidden; margin-bottom: 8px;"><div style="background: var(--reabilitacao); height: 100%; width: ${percentual}%;"></div></div>
-        <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-muted);">Valor Total</span><strong>${formatarMoeda(c.pacote.valorTotal)}</strong></div>
-        <div style="display: flex; justify-content: space-between; margin-top: 8px;"><span style="color: var(--text-muted);">Validade</span><strong>${new Date(c.pacote.validade).toLocaleDateString('pt-BR')}</strong></div>
+        <div style="display: flex; justify-content: space-between;"><span style="color: var(--text-muted);">Valor Total</span><strong>${formatarMoeda(c.pacote.ValorTotal)}</strong></div>
       </div>
     `;
   }
   
-  abrirModal(c.nome, `
+  abrirModal(c.Nome, `
     <div style="text-align: center; padding: 16px; background: var(--cream-light); border-radius: var(--radius); margin-bottom: 16px;">
-      <div style="width: 60px; height: 60px; border-radius: 50%; background: var(--${c.tipo}); color: white; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 1.5rem; font-family: 'Cormorant Garamond', serif;">${c.nome.charAt(0)}</div>
-      <div style="font-size: 1.4rem; font-weight: 600; color: var(--text-dark); font-family: 'Cormorant Garamond', serif;">${c.nome}</div>
-      <span class="card-badge ${c.tipo}" style="margin-top: 8px; display: inline-block;">${formatarTipo(c.tipo)}</span>
-      ${c.pausado ? '<div class="status-badge status-pausado" style="margin-top: 8px;">⏸️ Pausado</div>' : ''}
+      <div style="width: 60px; height: 60px; border-radius: 50%; background: var(--${tipo}); color: white; display: flex; align-items: center; justify-content: center; margin: 0 auto 12px; font-size: 1.5rem; font-family: 'Cormorant Garamond', serif;">${(c.Nome || 'C').charAt(0)}</div>
+      <div style="font-size: 1.4rem; font-weight: 600; color: var(--text-dark); font-family: 'Cormorant Garamond', serif;">${c.Nome}</div>
+      <span class="card-badge ${tipo}" style="margin-top: 8px; display: inline-block;">${formatarTipo(tipo)}</span>
+      ${c.Pausado ? '<div class="status-badge status-pausado" style="margin-top: 8px;">⏸️ Pausado</div>' : ''}
     </div>
     <div class="card" style="margin-bottom: 16px;">
-      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;"><span class="material-icons-round" style="color: var(--text-muted);">phone</span><span>${c.telefone || 'Sem telefone'}</span></div>
-      ${c.endereco ? `<div style="display: flex; align-items: center; gap: 8px;"><span class="material-icons-round" style="color: var(--text-muted);">location_on</span><span>${c.endereco}</span></div>` : ''}
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;"><span class="material-icons-round" style="color: var(--text-muted);">phone</span><span>${c.Telefone || 'Sem telefone'}</span></div>
+      ${c.Endereco ? `<div style="display: flex; align-items: center; gap: 8px;"><span class="material-icons-round" style="color: var(--text-muted);">location_on</span><span>${c.Endereco}</span></div>` : ''}
     </div>
     ${infoEspecifica}
-    ${c.agendaFixa ? `<div class="card" style="margin-bottom: 16px;"><div class="card-title" style="margin-bottom: 8px;">📅 Horários Fixos</div><div style="color: var(--text-medium);">${c.agendaFixa}</div></div>` : ''}
+    ${c.AgendaFixa ? `<div class="card" style="margin-bottom: 16px;"><div class="card-title" style="margin-bottom: 8px;">📅 Horários Fixos</div><div style="color: var(--text-medium);">${c.AgendaFixa}</div></div>` : ''}
     <div class="form-actions" style="margin-bottom: 12px;">
-      <button class="btn btn-primary" onclick="fecharModal(); abrirWhatsApp('${c.telefone}')"><span class="material-icons-round">send</span> WhatsApp</button>
-      <button class="btn btn-secondary" onclick="editarCliente('${c.id}')"><span class="material-icons-round">edit</span> Editar</button>
+      <button class="btn btn-primary" onclick="abrirWhatsApp('${c.Telefone}')"><span class="material-icons-round">send</span> WhatsApp</button>
+      <button class="btn btn-secondary" onclick="toast('Em desenvolvimento', 'info')"><span class="material-icons-round">edit</span> Editar</button>
     </div>
-    <button class="btn ${c.pausado ? 'btn-primary' : 'btn-accent'} btn-block" onclick="togglePausaCliente('${c.id}', ${c.pausado})">
-      <span class="material-icons-round">${c.pausado ? 'play_arrow' : 'pause'}</span> ${c.pausado ? 'Reativar' : 'Pausar'} ${c.tipo === 'pilates' ? 'Aluno' : 'Paciente'}
+    <button class="btn ${c.Pausado ? 'btn-primary' : 'btn-accent'} btn-block" onclick="togglePausaCliente('${c.ClienteID}', ${!!c.Pausado})">
+      <span class="material-icons-round">${c.Pausado ? 'play_arrow' : 'pause'}</span> ${c.Pausado ? 'Reativar' : 'Pausar'} Cliente
     </button>
   `);
 }
 
-// ============================================
-// MAIS OPÇÕES
-// ============================================
-function abrirRelatorios() {
-  abrirModal('📊 Relatórios', `<div class="menu-list">
-    <button class="menu-item" onclick="toast('Em desenvolvimento', 'info')"><span class="material-icons-round">calendar_month</span><span>Relatório Mensal</span></button>
-    <button class="menu-item" onclick="toast('Em desenvolvimento', 'info')"><span class="material-icons-round">payments</span><span>Comissões Pilates</span></button>
-    <button class="menu-item" onclick="toast('Em desenvolvimento', 'info')"><span class="material-icons-round">warning</span><span>Inadimplentes</span></button>
-  </div>`);
+async function togglePausaCliente(clienteId, pausadoAtualmente) {
+  const result = await apiCall('togglePausaCliente', { id: clienteId });
+  
+  if (result.success) {
+    toast(result.data?.message || 'Status alterado!', 'success');
+    fecharModal();
+    carregarClientes();
+  } else {
+    toast('Erro: ' + (result.error || 'Tente novamente'), 'error');
+  }
 }
 
-function abrirAulasAvulsas() {
-  abrirModal('📝 Aulas Avulsas', `
-    <div class="finance-card" style="margin-bottom: 16px;"><div class="finance-value" style="color: var(--pilates);">${formatarMoeda(118.80)}</div><div class="finance-label">Comissão do Mês (11 aulas)</div></div>
-    <button class="btn btn-primary btn-block" onclick="fecharModal(); abrirModalAulaAvulsa()"><span class="material-icons-round">add</span> Nova Aula Avulsa</button>
+function abrirDetalheAtendimento(agendamentoId) {
+  const ag = state.agendaHoje.find(a => a.AgendamentoID === agendamentoId);
+  if (!ag) {
+    toast('Atendimento não encontrado', 'error');
+    return;
+  }
+  
+  const tipo = ag.Tipo || 'terapia';
+  
+  abrirModal('Detalhes', `
+    <div style="text-align: center; padding: 16px; background: var(--cream-light); border-radius: var(--radius); margin-bottom: 16px;">
+      <div style="font-size: 1.4rem; font-weight: 600; color: var(--text-dark); font-family: 'Cormorant Garamond', serif;">${ag.NomeCliente || 'Cliente'}</div>
+      <div style="color: var(--text-muted); margin-top: 4px;">${ag.Hora} • ${formatarTipo(tipo)}</div>
+      <span class="card-badge ${tipo}" style="margin-top: 8px; display: inline-block;">${ag.Local === 'domicilio' ? '🏠 Domicílio' : '🏢 Clínica'}</span>
+    </div>
+    ${ag.Status !== 'Realizado' && ag.Status !== 'Faltou' && ag.Status !== 'FaltaJustificada' ? `
+      <div class="form-actions" style="margin-bottom: 16px;">
+        <button class="btn btn-primary" onclick="marcarRealizado('${ag.AgendamentoID}'); fecharModal();"><span class="material-icons-round">check_circle</span> Realizado</button>
+        <button class="btn btn-accent" onclick="fecharModal(); abrirModalFalta('${ag.AgendamentoID}')"><span class="material-icons-round">cancel</span> Falta</button>
+      </div>
+    ` : `
+      <div style="text-align: center; padding: 12px; background: ${ag.Status === 'Realizado' ? 'var(--primary-ultra-light)' : 'rgba(199, 107, 107, 0.1)'}; border-radius: var(--radius); margin-bottom: 16px;">
+        <span style="color: ${ag.Status === 'Realizado' ? 'var(--success)' : 'var(--danger)'}; font-weight: 600;">${ag.Status === 'Realizado' ? '✓ Atendimento Realizado' : '✗ Falta Registrada'}</span>
+      </div>
+    `}
+    <button class="btn btn-outline btn-block" onclick="fecharModal(); abrirDetalheCliente('${ag.ClienteID}')">
+      <span class="material-icons-round">person</span> Ver Perfil do Cliente
+    </button>
   `);
 }
 
-function abrirReposicoes() {
-  abrirModal('🔄 Reposições Pendentes', `<p style="color: var(--text-muted); margin-bottom: 16px;">Alunos com faltas justificadas aguardando reposição.</p>
-    <div class="card pilates"><div class="card-header"><div class="card-title">Maria Silva</div><span class="status-badge status-pendente">1 reposição</span></div><div class="card-info"><span>Falta em 28/01/2026</span></div></div>
+function abrirModalAulaAvulsa() {
+  abrirModal('📝 Aula Avulsa', `
+    <form onsubmit="salvarAulaAvulsa(event)">
+      <p style="color: var(--text-muted); margin-bottom: 16px;">Registre aulas dadas para alunos de outra fisioterapeuta.</p>
+      <div class="form-group">
+        <label class="form-label">Nome do Aluno</label>
+        <input type="text" class="form-input" name="nomeAluno" required placeholder="Nome do aluno">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Data</label>
+          <input type="date" class="form-input" name="data" required value="${formatarData(new Date())}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hora</label>
+          <input type="time" class="form-input" name="hora" required value="08:00">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Valor da Aula</label>
+        <input type="number" class="form-input" name="valor" value="27" step="0.01" required>
+        <div class="form-hint">Sua comissão (40%): ${formatarMoeda(CONFIG.VALOR_AULA_AVULSA * CONFIG.COMISSAO_PILATES)}</div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Registrar</button>
+      </div>
+    </form>
   `);
 }
 
+async function salvarAulaAvulsa(event) {
+  event.preventDefault();
+  const form = event.target;
+  const formData = new FormData(form);
+  
+  const result = await apiCall('createAulaAvulsa', {
+    NomeAluno: formData.get('nomeAluno'),
+    Data: formData.get('data'),
+    Hora: formData.get('hora'),
+    Valor: parseFloat(formData.get('valor')) || 27
+  });
+  
+  if (result.success) {
+    toast(`Aula avulsa registrada! Comissão: ${formatarMoeda(result.data?.Comissao || 10.80)}`, 'success');
+    fecharModal();
+  } else {
+    toast('Erro: ' + (result.error || 'Tente novamente'), 'error');
+  }
+}
+
+function abrirModalNovoAgendamento(data, hora) {
+  if (state.clientes.length === 0) {
+    toast('Cadastre um cliente primeiro', 'warning');
+    return;
+  }
+  
+  abrirModal('📅 Novo Agendamento', `
+    <form onsubmit="salvarAgendamento(event)">
+      <input type="hidden" name="data" value="${data}">
+      <input type="hidden" name="hora" value="${hora}">
+      <div style="text-align: center; padding: 12px; background: var(--cream-light); border-radius: var(--radius); margin-bottom: 16px;">
+        <strong>${new Date(data + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</strong>
+        <br>às <strong>${hora}</strong>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Cliente</label>
+        <select class="form-select" name="clienteId" required onchange="preencherDadosCliente(this.value)">
+          <option value="">Selecione...</option>
+          ${state.clientes.map(c => `<option value="${c.ClienteID}" data-tipo="${c.Tipo}" data-nome="${c.Nome}">${c.Nome} (${formatarTipo(c.Tipo)})</option>`).join('')}
+        </select>
+      </div>
+      <input type="hidden" name="tipo" id="tipoAgendamento" value="terapia">
+      <input type="hidden" name="nomeCliente" id="nomeClienteAgendamento" value="">
+      <div class="form-group">
+        <label class="form-label">Observações</label>
+        <textarea class="form-textarea" name="observacoes" placeholder="Informações adicionais..."></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Agendar</button>
+      </div>
+    </form>
+  `);
+}
+
+function preencherDadosCliente(clienteId) {
+  const cliente = state.clientes.find(c => c.ClienteID === clienteId);
+  if (cliente) {
+    document.getElementById('tipoAgendamento').value = cliente.Tipo || 'terapia';
+    document.getElementById('nomeClienteAgendamento').value = cliente.Nome || '';
+  }
+}
+
+async function salvarAgendamento(event) {
+  event.preventDefault();
+  const form = event.target;
+  const formData = new FormData(form);
+  
+  const result = await apiCall('createAgendamento', {
+    Data: formData.get('data'),
+    Hora: formData.get('hora'),
+    ClienteID: formData.get('clienteId'),
+    NomeCliente: formData.get('nomeCliente'),
+    Tipo: formData.get('tipo'),
+    Observacoes: formData.get('observacoes')
+  });
+  
+  if (result.success) {
+    toast('Agendamento criado!', 'success');
+    fecharModal();
+    carregarAgendaSemanal();
+    carregarAgendaHoje();
+  } else {
+    toast('Erro: ' + (result.error || 'Tente novamente'), 'error');
+  }
+}
+
+function abrirModalAgendamentoRapido() {
+  abrirModal('⚡ Agendamento Rápido', `
+    <form onsubmit="salvarAgendamentoRapido(event)">
+      <div class="form-group">
+        <label class="form-label">Nome do Cliente</label>
+        <input type="text" class="form-input" name="nomeCliente" required placeholder="Nome">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Data</label>
+          <input type="date" class="form-input" name="data" required value="${formatarData(new Date())}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hora</label>
+          <input type="time" class="form-input" name="hora" required value="08:00">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tipo</label>
+        <div class="radio-group">
+          <label class="radio-option"><input type="radio" name="tipo" value="pilates"><span class="radio-label">Pilates</span></label>
+          <label class="radio-option"><input type="radio" name="tipo" value="reabilitacao"><span class="radio-label">Reab</span></label>
+          <label class="radio-option"><input type="radio" name="tipo" value="terapia" checked><span class="radio-label">Terapia</span></label>
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Agendar</button>
+      </div>
+    </form>
+  `);
+}
+
+async function salvarAgendamentoRapido(event) {
+  event.preventDefault();
+  const form = event.target;
+  const formData = new FormData(form);
+  
+  const result = await apiCall('createAgendamento', {
+    Data: formData.get('data'),
+    Hora: formData.get('hora'),
+    NomeCliente: formData.get('nomeCliente'),
+    Tipo: formData.get('tipo'),
+    TipoAgendamento: 'avulso'
+  });
+  
+  if (result.success) {
+    toast('Agendamento criado!', 'success');
+    fecharModal();
+    carregarAgendaSemanal();
+    carregarAgendaHoje();
+  } else {
+    toast('Erro: ' + (result.error || 'Tente novamente'), 'error');
+  }
+}
+
+// ============================================
+// CONFIGURAÇÕES
+// ============================================
 function abrirConfiguracoes() {
-  abrirModal('⚙️ Configurações', `<div class="menu-list">
-    <button class="menu-item" onclick="abrirConfigAPI()"><span class="material-icons-round">link</span><span>Configurar API</span></button>
-    <button class="menu-item" onclick="toast('Em desenvolvimento', 'info')"><span class="material-icons-round">attach_money</span><span>Valores e Planos</span></button>
-  </div>
-  <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--cream);"><p style="font-size: 0.8rem; color: var(--text-muted); text-align: center;">Dr. Lucas Cordeiro - Fisioterapeuta<br>Versão 1.0.0</p></div>`);
+  abrirModal('⚙️ Configurações', `
+    <div class="menu-list">
+      <button class="menu-item" onclick="abrirConfigAPI()">
+        <span class="material-icons-round">link</span>
+        <span>Configurar API</span>
+        <span class="material-icons-round arrow">chevron_right</span>
+      </button>
+      <button class="menu-item" onclick="abrirRelatorios()">
+        <span class="material-icons-round">assessment</span>
+        <span>Relatórios</span>
+        <span class="material-icons-round arrow">chevron_right</span>
+      </button>
+      <button class="menu-item" onclick="abrirReposicoes()">
+        <span class="material-icons-round">event_repeat</span>
+        <span>Reposições Pendentes</span>
+        <span class="material-icons-round arrow">chevron_right</span>
+      </button>
+      <button class="menu-item" onclick="abrirAulasAvulsas()">
+        <span class="material-icons-round">event_available</span>
+        <span>Aulas Avulsas</span>
+        <span class="material-icons-round arrow">chevron_right</span>
+      </button>
+    </div>
+    <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--cream); text-align: center;">
+      <p style="font-size: 0.8rem; color: var(--text-muted);">Dr. Lucas Cordeiro - Fisioterapeuta<br>Versão 1.0.0</p>
+    </div>
+  `);
 }
 
 function abrirConfigAPI() {
-  abrirModal('🔗 Configurar API', `<form onsubmit="salvarConfigAPI(event)">
-    <div class="form-group"><label class="form-label">URL do Google Apps Script</label><input type="url" class="form-input" name="apiUrl" value="${CONFIG.API_URL}" placeholder="https://script.google.com/macros/s/.../exec"><div class="form-hint">Cole a URL da implantação do Apps Script</div></div>
-    <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button><button type="submit" class="btn btn-primary">Salvar</button></div>
-  </form>`);
+  abrirModal('🔗 Configurar API', `
+    <form onsubmit="salvarConfigAPI(event)">
+      <div class="form-group">
+        <label class="form-label">URL do Google Apps Script</label>
+        <input type="url" class="form-input" name="apiUrl" value="${CONFIG.API_URL}" 
+               placeholder="https://script.google.com/macros/s/.../exec" required>
+        <div class="form-hint">Cole a URL da implantação do Apps Script</div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Salvar</button>
+      </div>
+    </form>
+  `);
 }
 
 function salvarConfigAPI(event) {
   event.preventDefault();
-  CONFIG.API_URL = event.target.apiUrl.value;
-  localStorage.setItem('apiUrl', CONFIG.API_URL);
-  toast('API configurada!', 'success');
+  const url = event.target.apiUrl.value;
+  localStorage.setItem('apiUrl', url);
+  CONFIG.API_URL = url;
+  toast('API configurada! Recarregando...', 'success');
   fecharModal();
+  setTimeout(() => location.reload(), 1000);
 }
 
-function abrirModalNovoAgendamento(data, hora) {
-  abrirModal('📅 Novo Agendamento', `<form onsubmit="salvarAgendamento(event)">
-    <input type="hidden" name="data" value="${data}"><input type="hidden" name="hora" value="${hora}">
-    <div style="text-align: center; padding: 12px; background: var(--cream-light); border-radius: var(--radius); margin-bottom: 16px;"><strong>${new Date(data + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' })}</strong><br>às <strong>${hora}</strong></div>
-    <div class="form-group"><label class="form-label">Cliente</label><select class="form-select" name="clienteId" required><option value="">Selecione...</option>${state.clientes.map(c => `<option value="${c.id}">${c.nome}</option>`).join('')}</select></div>
-    <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button><button type="submit" class="btn btn-primary">Agendar</button></div>
-  </form>`);
+function abrirRelatorios() {
+  toast('Em desenvolvimento', 'info');
 }
 
-function abrirModalAgendamentoRapido() {
-  abrirModal('⚡ Agendamento Rápido', `<form onsubmit="salvarAgendamento(event)">
-    <div class="form-group"><label class="form-label">Cliente</label><input type="text" class="form-input" name="nomeCliente" required placeholder="Nome"></div>
-    <div class="form-row"><div class="form-group"><label class="form-label">Data</label><input type="date" class="form-input" name="data" required value="${formatarData(new Date())}"></div><div class="form-group"><label class="form-label">Hora</label><input type="time" class="form-input" name="hora" required value="08:00"></div></div>
-    <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="fecharModal()">Cancelar</button><button type="submit" class="btn btn-primary">Agendar</button></div>
-  </form>`);
+async function abrirReposicoes() {
+  const result = await apiCall('getReposicoes', { status: 'Pendente' });
+  const reposicoes = result.success && result.data ? result.data : [];
+  
+  if (reposicoes.length === 0) {
+    abrirModal('🔄 Reposições', `<div class="empty-state"><span class="material-icons-round">event_repeat</span><h3>Nenhuma reposição pendente</h3></div>`);
+    return;
+  }
+  
+  abrirModal('🔄 Reposições Pendentes', reposicoes.map(r => `
+    <div class="card pilates">
+      <div class="card-header">
+        <div class="card-title">${r.NomeCliente}</div>
+        <span class="status-badge status-pendente">Pendente</span>
+      </div>
+      <div class="card-info">Falta em ${new Date(r.DataFalta).toLocaleDateString('pt-BR')}</div>
+    </div>
+  `).join(''));
 }
 
-// ============================================
-// AÇÕES
-// ============================================
-function marcarRealizado(id) { toast('Atendimento realizado!', 'success'); fecharModal(); carregarAgendaHoje(); }
-function confirmarFalta(id) { const tipo = document.querySelector('input[name="tipoFalta"]:checked')?.value; toast(tipo === 'justificada' ? 'Falta justificada. Reposição pendente.' : 'Falta registrada.', tipo === 'justificada' ? 'warning' : 'info'); fecharModal(); carregarAgendaHoje(); }
-function salvarCliente(event, tipo) { event.preventDefault(); toast('Cadastrado com sucesso!', 'success'); fecharModal(); carregarClientes(); }
-function salvarAulaAvulsa(event) { event.preventDefault(); toast('Aula avulsa registrada!', 'success'); fecharModal(); }
-function salvarAgendamento(event) { event.preventDefault(); toast('Agendamento criado!', 'success'); fecharModal(); carregarAgendaSemanal(); }
-function togglePausaCliente(id, pausado) { toast(`Cliente ${pausado ? 'reativado' : 'pausado'}!`, 'success'); fecharModal(); carregarClientes(); }
-function editarCliente(id) { toast('Em desenvolvimento', 'info'); }
-function abrirWhatsApp(tel) { if (!tel) { toast('Sem telefone', 'warning'); return; } const t = tel.replace(/\D/g, ''); window.open(`https://wa.me/${t.startsWith('55') ? t : '55' + t}`, '_blank'); }
+async function abrirAulasAvulsas() {
+  const result = await apiCall('getAulasAvulsas', { 
+    mes: new Date().getMonth() + 1, 
+    ano: new Date().getFullYear() 
+  });
+  const aulas = result.success && result.data ? result.data : [];
+  
+  const totalComissao = aulas.reduce((acc, a) => acc + (parseFloat(a.Comissao) || 0), 0);
+  
+  abrirModal('📝 Aulas Avulsas', `
+    <div class="finance-card" style="margin-bottom: 16px; text-align: center;">
+      <div class="finance-value" style="color: var(--pilates);">${formatarMoeda(totalComissao)}</div>
+      <div class="finance-label">Comissão do Mês (${aulas.length} aulas)</div>
+    </div>
+    <button class="btn btn-primary btn-block" style="margin-bottom: 16px;" onclick="fecharModal(); abrirModalAulaAvulsa()">
+      <span class="material-icons-round">add</span> Nova Aula Avulsa
+    </button>
+    ${aulas.length > 0 ? aulas.slice(0, 10).map(a => `
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">${a.NomeAluno}</div>
+          <span style="color: var(--pilates); font-weight: 600;">${formatarMoeda(a.Comissao)}</span>
+        </div>
+        <div class="card-info">${new Date(a.Data).toLocaleDateString('pt-BR')} • ${a.Hora}</div>
+      </div>
+    `).join('') : ''}
+  `);
+}
+
+function abrirWhatsApp(telefone) {
+  if (!telefone) {
+    toast('Cliente sem telefone cadastrado', 'warning');
+    return;
+  }
+  const telLimpo = telefone.replace(/\D/g, '');
+  const telFormatado = telLimpo.startsWith('55') ? telLimpo : '55' + telLimpo;
+  window.open(`https://wa.me/${telFormatado}`, '_blank');
+}
 
 // ============================================
 // UTILITÁRIOS
 // ============================================
-function toast(msg, tipo = 'info') { const t = document.createElement('div'); t.className = `toast ${tipo}`; t.textContent = msg; document.getElementById('toastContainer').appendChild(t); setTimeout(() => t.remove(), 3000); }
-function formatarMoeda(v) { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0); }
-function formatarData(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
-function formatarTipo(t) { return { pilates: 'Pilates', reabilitacao: 'Reabilitação', terapia: 'Terapia Manual' }[t] || t; }
-function capitalizar(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
-function getInicioSemana(d) { const x = new Date(d); x.setDate(x.getDate() - x.getDay() + (x.getDay() === 0 ? -6 : 1)); x.setHours(0,0,0,0); return x; }
-function isMesmaData(a, b) { return a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear(); }
-
-// ============================================
-// DADOS DE EXEMPLO
-// ============================================
-function gerarDadosExemplo() {
-  return [
-    { id: '1', nome: 'Maria Silva', tipo: 'pilates', hora: '08:00', local: 'clinica', status: 'agendado', totalAlunos: 3, clienteId: 'c1' },
-    { id: '2', nome: 'João Santos', tipo: 'pilates', hora: '08:00', local: 'clinica', status: 'agendado', clienteId: 'c2' },
-    { id: '3', nome: 'Ana Costa', tipo: 'pilates', hora: '08:00', local: 'clinica', status: 'agendado', clienteId: 'c3' },
-    { id: '4', nome: 'Carlos Oliveira', tipo: 'reabilitacao', hora: '09:00', local: 'clinica', status: 'agendado', clienteId: 'c4' },
-    { id: '5', nome: 'Paula Lima', tipo: 'pilates', hora: '10:00', local: 'clinica', status: 'realizado', totalAlunos: 2, clienteId: 'c5' },
-    { id: '6', nome: 'Pedro Alves', tipo: 'terapia', hora: '14:00', local: 'domicilio', status: 'agendado', clienteId: 'c6' },
-    { id: '7', nome: 'Lucia Fernandes', tipo: 'reabilitacao', hora: '15:00', local: 'clinica', status: 'agendado', clienteId: 'c7' },
-    { id: '8', nome: 'Roberto Dias', tipo: 'pilates', hora: '17:00', local: 'clinica', status: 'agendado', totalAlunos: 4, clienteId: 'c8' },
-  ];
+function toast(msg, tipo = 'info') {
+  const container = document.getElementById('toastContainer');
+  const t = document.createElement('div');
+  t.className = `toast ${tipo}`;
+  t.textContent = msg;
+  container.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
 }
 
-function gerarDadosExemploSemana(inicio) {
-  const dados = [], tipos = ['pilates', 'reabilitacao', 'terapia'], nomes = ['Maria', 'João', 'Ana', 'Carlos', 'Paula', 'Pedro'];
-  for (let i = 0; i < 6; i++) { const dia = new Date(inicio); dia.setDate(inicio.getDate() + i); const ds = formatarData(dia);
-    CONFIG.HORARIOS.forEach(h => { if (Math.random() > 0.7) dados.push({ id: `ag-${ds}-${h}`, nome: nomes[Math.floor(Math.random() * nomes.length)], tipo: tipos[Math.floor(Math.random() * tipos.length)], data: ds, hora: h, local: Math.random() > 0.8 ? 'domicilio' : 'clinica', status: Math.random() > 0.8 ? 'realizado' : 'agendado' }); });
-  } return dados;
+function formatarMoeda(valor) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor || 0);
 }
 
-function gerarClientesExemplo() {
-  return [
-    { id: 'c1', nome: 'Maria Silva', tipo: 'pilates', telefone: '(88) 99999-1111', frequenciaSemanal: 2, diaVencimento: 10, statusPagamento: 'pago', agendaFixa: 'SEG 08:00, QUA 08:00', reposicoePendentes: 1 },
-    { id: 'c2', nome: 'João Santos', tipo: 'pilates', telefone: '(88) 99999-2222', frequenciaSemanal: 3, diaVencimento: 15, statusPagamento: 'atrasado', agendaFixa: 'SEG 08:00, QUA 08:00, SEX 08:00' },
-    { id: 'c3', nome: 'Ana Costa', tipo: 'pilates', telefone: '(88) 99999-3333', frequenciaSemanal: 2, diaVencimento: 5, statusPagamento: 'pendente', agendaFixa: 'TER 10:00, QUI 10:00' },
-    { id: 'c4', nome: 'Carlos Oliveira', tipo: 'reabilitacao', telefone: '(88) 99999-4444', endereco: 'Rua das Flores, 123', pacote: { totalSessoes: 10, sessoesRestantes: 7, valorTotal: 800, validade: '2026-03-15' }, agendaFixa: 'SEG 09:00, QUI 09:00' },
-    { id: 'c5', nome: 'Paula Lima', tipo: 'pilates', telefone: '(88) 99999-5555', frequenciaSemanal: 1, diaVencimento: 20, statusPagamento: 'pago', agendaFixa: 'QUA 10:00', pausado: true },
-    { id: 'c6', nome: 'Pedro Alves', tipo: 'terapia', telefone: '(88) 99999-6666', endereco: 'Av. Principal, 456', valorSessao: 150 },
-    { id: 'c7', nome: 'Lucia Fernandes', tipo: 'reabilitacao', telefone: '(88) 99999-7777', pacote: { totalSessoes: 8, sessoesRestantes: 2, valorTotal: 640, validade: '2026-02-28' }, agendaFixa: 'TER 15:00, SEX 15:00' },
-    { id: 'c8', nome: 'Roberto Dias', tipo: 'pilates', telefone: '(88) 99999-8888', frequenciaSemanal: 2, diaVencimento: 1, statusPagamento: 'pago', agendaFixa: 'SEG 17:00, QUI 17:00' },
-  ];
+function formatarData(data) {
+  const d = new Date(data);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatarTipo(tipo) {
+  return { pilates: 'Pilates', reabilitacao: 'Reabilitação', terapia: 'Terapia Manual' }[tipo] || tipo;
+}
+
+function capitalizar(str) {
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function getInicioSemana(data) {
+  const d = new Date(data);
+  const dia = d.getDay();
+  const diff = d.getDate() - dia + (dia === 0 ? -6 : 1);
+  d.setDate(diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function isMesmaData(a, b) {
+  return a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
 }
